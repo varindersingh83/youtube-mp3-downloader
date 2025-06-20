@@ -1,0 +1,12 @@
+{
+  "name": "youtube-mp3-downloader",
+  "version": "1.0.0",
+  "description": "YouTube to MP3 Downloader - Full Stack Application",
+  "scripts": {
+    "dev": "concurrently \"cd backend && npm start\" \"cd frontend && npm run dev\"",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+} 

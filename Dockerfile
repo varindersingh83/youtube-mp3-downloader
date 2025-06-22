@@ -34,8 +34,11 @@ RUN cd frontend && npm run build
 # Create downloads directory
 RUN mkdir -p backend/downloads
 
+# Copy built frontend to backend public directory
+RUN mkdir -p backend/public && cp -r frontend/dist/* backend/public/
+
 # Expose port
 EXPOSE 5001
 
-# Start the application
-CMD ["npm", "start"] 
+# Start the backend application (which will serve both API and frontend)
+CMD ["node", "backend/index.js"] 

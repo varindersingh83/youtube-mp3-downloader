@@ -1,16 +1,18 @@
-# Use Node.js 18 as base image
-FROM node:18-slim
+# Use Python base image to avoid externally managed environment issues
+FROM python:3.11-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    ffmpeg \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
+
 # Install yt-dlp
-RUN pip3 install yt-dlp
+RUN pip install yt-dlp
 
 # Set working directory
 WORKDIR /app

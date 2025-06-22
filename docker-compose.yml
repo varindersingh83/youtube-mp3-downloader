@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  youtube-mp3-downloader:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./backend/downloads:/app/backend/downloads
+    restart: unless-stopped

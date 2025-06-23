@@ -12,93 +12,128 @@ if (!fs.existsSync(downloadFolder)) {
 
 router.post('/download', (req, res) => {
   const { url } = req.body;
+  console.log('=== DOWNLOAD REQUEST START ===');
   console.log('Received download request for URL:', url);
+  console.log('Current working directory:', process.cwd());
+  console.log('Download folder:', downloadFolder);
   
   if (!url) {
     console.error('Error: Missing URL in request');
     return res.status(400).json({ error: 'Missing URL' });
   }
 
-  // First, get the video title
-  const getTitleCommand = `yt-dlp --get-title "${url}"`;
-  console.log('Getting video title with command:', getTitleCommand);
-
-  exec(getTitleCommand, (titleErr, titleStdout, titleStderr) => {
-    if (titleErr) {
-      console.error('Error getting title:', titleErr);
-      console.error('Error details:', titleStderr);
-      return res.status(500).json({ error: 'Failed to get video title' });
+  // Check if yt-dlp is available
+  console.log('=== CHECKING YT-DLP ===');
+  exec('which yt-dlp', (whichErr, whichStdout, whichStderr) => {
+    if (whichErr) {
+      console.error('yt-dlp not found in PATH:', whichErr);
+      console.error('which stderr:', whichStderr);
+      return res.status(500).json({ error: 'yt-dlp not found' });
     }
-
-    const title = titleStdout.trim();
-    console.log('=== TITLE HANDLING ===');
-    console.log('1. Raw title from YouTube:', title);
-    console.log('2. Title that will be used in filename:', `${title}.mp3`);
-
-    // Sanitize the title to make it safe for filenames
-    const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    console.log('3. Sanitized title for temporary file:', sanitizedTitle);
+    console.log('yt-dlp found at:', whichStdout.trim());
     
-    const outputPath = path.join(downloadFolder, `${sanitizedTitle}.mp3`);
-    console.log('4. Temporary file path:', outputPath);
-    
-    const command = `yt-dlp -x --audio-format mp3 -o "${outputPath}" "${url}"`;
-    console.log('Executing download command:', command);
-
-    exec(command, (err, stdout, stderr) => {
-      if (err) {
-        console.error('Download error:', err);
-        console.error('Error details:', stderr);
-        return res.status(500).json({ error: 'Download failed' });
+    // Check yt-dlp version
+    exec('yt-dlp --version', (versionErr, versionStdout, versionStderr) => {
+      if (versionErr) {
+        console.error('Error getting yt-dlp version:', versionErr);
+        console.error('Version stderr:', versionStderr);
+      } else {
+        console.log('yt-dlp version:', versionStdout.trim());
       }
-
-      console.log('Download output:', stdout);
       
-      if (!fs.existsSync(outputPath)) {
-        console.error('Error: MP3 file not found at expected path');
-        return res.status(500).json({ error: 'MP3 not found' });
-      }
+      // First, get the video title
+      const getTitleCommand = `yt-dlp --get-title "${url}"`;
+      console.log('=== GETTING VIDEO TITLE ===');
+      console.log('Getting video title with command:', getTitleCommand);
 
-      console.log('Found MP3 file:', outputPath);
-      console.log('=== SENDING FILE ===');
-      
-      // Get file stats
-      const stats = fs.statSync(outputPath);
-      console.log('File size:', stats.size);
+      exec(getTitleCommand, { timeout: 30000 }, (titleErr, titleStdout, titleStderr) => {
+        if (titleErr) {
+          console.error('Error getting title:', titleErr);
+          console.error('Error details:', titleStderr);
+          console.error('Title stdout (if any):', titleStdout);
+          return res.status(500).json({ error: 'Failed to get video title' });
+        }
 
-      // Set CORS headers
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-      
-      // Set content headers
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Length', stats.size);
-      res.setHeader('Content-Disposition', `attachment; filename="${title}.mp3"`);
-      
-      console.log('5. Headers set:');
-      console.log('   Content-Type:', res.getHeader('Content-Type'));
-      console.log('   Content-Length:', res.getHeader('Content-Length'));
-      console.log('   Content-Disposition:', res.getHeader('Content-Disposition'));
+        const title = titleStdout.trim();
+        console.log('=== TITLE HANDLING ===');
+        console.log('1. Raw title from YouTube:', title);
+        console.log('2. Title that will be used in filename:', `${title}.mp3`);
 
-      // Create a read stream and pipe it to the response
-      const fileStream = fs.createReadStream(outputPath);
-      fileStream.pipe(res);
+        // Sanitize the title to make it safe for filenames
+        const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        console.log('3. Sanitized title for temporary file:', sanitizedTitle);
+        
+        const outputPath = path.join(downloadFolder, `${sanitizedTitle}.mp3`);
+        console.log('4. Temporary file path:', outputPath);
+        
+        const command = `yt-dlp -x --audio-format mp3 -o "${outputPath}" "${url}"`;
+        console.log('=== DOWNLOADING AUDIO ===');
+        console.log('Executing download command:', command);
 
-      // Handle cleanup after the file is sent
-      fileStream.on('end', () => {
-        console.log('6. File sent successfully with filename:', `${title}.mp3`);
-        // Cleanup
-        fs.unlink(outputPath, (err) => {
+        exec(command, { timeout: 120000 }, (err, stdout, stderr) => {
           if (err) {
-            console.error('Error deleting file:', err);
-          } else {
-            console.log('7. Temporary file deleted:', outputPath);
+            console.error('Download error:', err);
+            console.error('Error details:', stderr);
+            console.error('Download stdout (if any):', stdout);
+            return res.status(500).json({ error: 'Download failed' });
           }
-        });
-      });
 
-      fileStream.on('error', (err) => {
-        console.error('Error streaming file:', err);
-        res.status(500).json({ error: 'Error streaming file' });
+          console.log('Download output:', stdout);
+          
+          if (!fs.existsSync(outputPath)) {
+            console.error('Error: MP3 file not found at expected path');
+            console.error('Checking download folder contents:');
+            try {
+              const files = fs.readdirSync(downloadFolder);
+              console.error('Files in download folder:', files);
+            } catch (readErr) {
+              console.error('Error reading download folder:', readErr);
+            }
+            return res.status(500).json({ error: 'MP3 not found' });
+          }
+
+          console.log('Found MP3 file:', outputPath);
+          console.log('=== SENDING FILE ===');
+          
+          // Get file stats
+          const stats = fs.statSync(outputPath);
+          console.log('File size:', stats.size);
+
+          // Set CORS headers
+          res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+          
+          // Set content headers
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Content-Length', stats.size);
+          res.setHeader('Content-Disposition', `attachment; filename="${title}.mp3"`);
+          
+          console.log('5. Headers set:');
+          console.log('   Content-Type:', res.getHeader('Content-Type'));
+          console.log('   Content-Length:', res.getHeader('Content-Length'));
+          console.log('   Content-Disposition:', res.getHeader('Content-Disposition'));
+
+          // Create a read stream and pipe it to the response
+          const fileStream = fs.createReadStream(outputPath);
+          fileStream.pipe(res);
+
+          // Handle cleanup after the file is sent
+          fileStream.on('end', () => {
+            console.log('6. File sent successfully with filename:', `${title}.mp3`);
+            // Cleanup
+            fs.unlink(outputPath, (err) => {
+              if (err) {
+                console.error('Error deleting file:', err);
+              } else {
+                console.log('7. Temporary file deleted:', outputPath);
+              }
+            });
+          });
+
+          fileStream.on('error', (err) => {
+            console.error('Error streaming file:', err);
+            res.status(500).json({ error: 'Error streaming file' });
+          });
+        });
       });
     });
   });

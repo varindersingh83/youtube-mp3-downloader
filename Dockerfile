@@ -5,14 +5,16 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs
 
-# Install yt-dlp
-RUN pip install yt-dlp
+# Install latest yt-dlp
+RUN pip install --upgrade pip && \
+    pip install --upgrade yt-dlp
 
 # Set working directory
 WORKDIR /app

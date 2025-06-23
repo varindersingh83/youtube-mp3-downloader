@@ -37,8 +37,8 @@ RUN mkdir -p backend/downloads
 # Copy built frontend to backend public directory
 RUN mkdir -p backend/public && cp -r frontend/dist/* backend/public/
 
-# Expose port
-EXPOSE 5001
+# Expose port (Railway uses PORT environment variable)
+EXPOSE 8080
 
 # Start the backend application (which will serve both API and frontend)
 CMD ["node", "backend/index.js"] 

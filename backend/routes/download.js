@@ -10,6 +10,21 @@ if (!fs.existsSync(downloadFolder)) {
   fs.mkdirSync(downloadFolder);
 }
 
+// Function to clean YouTube URL (remove playlist parameters)
+function cleanYouTubeUrl(url) {
+  console.log('=== URL CLEANING ===');
+  console.log('Original URL:', url);
+  
+  // Remove playlist and radio parameters
+  let cleanUrl = url;
+  if (url.includes('&list=') || url.includes('&start_radio=')) {
+    cleanUrl = url.split('&')[0]; // Take only the video ID part
+    console.log('Cleaned URL (removed playlist params):', cleanUrl);
+  }
+  
+  return cleanUrl;
+}
+
 router.post('/download', (req, res) => {
   const { url } = req.body;
   console.log('=== DOWNLOAD REQUEST START ===');
@@ -21,6 +36,10 @@ router.post('/download', (req, res) => {
     console.error('Error: Missing URL in request');
     return res.status(400).json({ error: 'Missing URL' });
   }
+
+  // Clean the URL to remove playlist parameters
+  const cleanUrl = cleanYouTubeUrl(url);
+  console.log('Using cleaned URL for processing:', cleanUrl);
 
   // Check if yt-dlp is available
   console.log('=== CHECKING YT-DLP ===');
@@ -41,31 +60,49 @@ router.post('/download', (req, res) => {
         console.log('yt-dlp version:', versionStdout.trim());
       }
       
-      // First, get the video title with anti-detection measures
-      const getTitleCommand = `yt-dlp --get-title --no-check-certificates --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "${url}"`;
+      // First, get the video title with anti-detection measures and playlist handling
+      const getTitleCommand = `yt-dlp --get-title --no-check-certificates --no-playlist --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "${cleanUrl}"`;
       console.log('=== GETTING VIDEO TITLE ===');
       console.log('Getting video title with command:', getTitleCommand);
 
-      exec(getTitleCommand, { timeout: 30000 }, (titleErr, titleStdout, titleStderr) => {
+      exec(getTitleCommand, { timeout: 60000 }, (titleErr, titleStdout, titleStderr) => {
+        console.log('=== TITLE COMMAND RESULT ===');
+        console.log('Title command completed');
+        console.log('Title stdout length:', titleStdout ? titleStdout.length : 0);
+        console.log('Title stderr length:', titleStderr ? titleStderr.length : 0);
+        
         if (titleErr) {
           console.error('Error getting title:', titleErr);
           console.error('Error details:', titleStderr);
           console.error('Title stdout (if any):', titleStdout);
           
-          // Try alternative approach with different user agent
-          console.log('=== RETRYING WITH ALTERNATIVE USER AGENT ===');
-          const altTitleCommand = `yt-dlp --get-title --no-check-certificates --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+          // Check if it's a timeout issue
+          if (titleErr.signal === 'SIGTERM') {
+            console.error('Command was killed by timeout (SIGTERM)');
+            console.error('This might be due to playlist processing taking too long');
+          }
           
-          exec(altTitleCommand, { timeout: 30000 }, (altTitleErr, altTitleStdout, altTitleStderr) => {
+          // Try alternative approach with different user agent and longer timeout
+          console.log('=== RETRYING WITH ALTERNATIVE USER AGENT ===');
+          const altTitleCommand = `yt-dlp --get-title --no-check-certificates --no-playlist --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${cleanUrl}"`;
+          
+          exec(altTitleCommand, { timeout: 90000 }, (altTitleErr, altTitleStdout, altTitleStderr) => {
+            console.log('=== ALTERNATIVE TITLE COMMAND RESULT ===');
+            console.log('Alternative title command completed');
+            console.log('Alternative title stdout length:', altTitleStdout ? altTitleStdout.length : 0);
+            
             if (altTitleErr) {
               console.error('Alternative title command also failed:', altTitleErr);
               console.error('Alternative error details:', altTitleStderr);
-              return res.status(500).json({ error: 'Failed to get video title - YouTube bot detection' });
+              if (altTitleErr.signal === 'SIGTERM') {
+                console.error('Alternative command also killed by timeout');
+              }
+              return res.status(500).json({ error: 'Failed to get video title - YouTube bot detection or timeout' });
             }
             
             const title = altTitleStdout.trim();
             console.log('Alternative title command succeeded:', title);
-            processDownload(title, url, res);
+            processDownload(title, cleanUrl, res);
           });
           return;
         }
@@ -75,7 +112,7 @@ router.post('/download', (req, res) => {
         console.log('1. Raw title from YouTube:', title);
         console.log('2. Title that will be used in filename:', `${title}.mp3`);
 
-        processDownload(title, url, res);
+        processDownload(title, cleanUrl, res);
       });
     });
   });
@@ -89,26 +126,42 @@ function processDownload(title, url, res) {
   const outputPath = path.join(downloadFolder, `${sanitizedTitle}.mp3`);
   console.log('4. Temporary file path:', outputPath);
   
-  // Use anti-detection measures for download
-  const command = `yt-dlp -x --audio-format mp3 --no-check-certificates --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --sleep-interval 2 --max-sleep-interval 5 -o "${outputPath}" "${url}"`;
+  // Use anti-detection measures for download with playlist handling
+  const command = `yt-dlp -x --audio-format mp3 --no-check-certificates --no-playlist --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --sleep-interval 2 --max-sleep-interval 5 -o "${outputPath}" "${url}"`;
   console.log('=== DOWNLOADING AUDIO ===');
   console.log('Executing download command:', command);
 
-  exec(command, { timeout: 120000 }, (err, stdout, stderr) => {
+  exec(command, { timeout: 180000 }, (err, stdout, stderr) => {
+    console.log('=== DOWNLOAD COMMAND RESULT ===');
+    console.log('Download command completed');
+    console.log('Download stdout length:', stdout ? stdout.length : 0);
+    console.log('Download stderr length:', stderr ? stderr.length : 0);
+    
     if (err) {
       console.error('Download error:', err);
       console.error('Error details:', stderr);
       console.error('Download stdout (if any):', stdout);
       
+      if (err.signal === 'SIGTERM') {
+        console.error('Download command was killed by timeout (SIGTERM)');
+      }
+      
       // Try alternative download approach
       console.log('=== RETRYING DOWNLOAD WITH ALTERNATIVE USER AGENT ===');
-      const altCommand = `yt-dlp -x --audio-format mp3 --no-check-certificates --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --sleep-interval 3 --max-sleep-interval 7 -o "${outputPath}" "${url}"`;
+      const altCommand = `yt-dlp -x --audio-format mp3 --no-check-certificates --no-playlist --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --sleep-interval 3 --max-sleep-interval 7 -o "${outputPath}" "${url}"`;
       
-      exec(altCommand, { timeout: 120000 }, (altErr, altStdout, altStderr) => {
+      exec(altCommand, { timeout: 240000 }, (altErr, altStdout, altStderr) => {
+        console.log('=== ALTERNATIVE DOWNLOAD COMMAND RESULT ===');
+        console.log('Alternative download command completed');
+        console.log('Alternative download stdout length:', altStdout ? altStdout.length : 0);
+        
         if (altErr) {
           console.error('Alternative download command also failed:', altErr);
           console.error('Alternative error details:', altStderr);
-          return res.status(500).json({ error: 'Download failed - YouTube bot detection' });
+          if (altErr.signal === 'SIGTERM') {
+            console.error('Alternative download command also killed by timeout');
+          }
+          return res.status(500).json({ error: 'Download failed - YouTube bot detection or timeout' });
         }
         
         console.log('Alternative download command succeeded:', altStdout);
